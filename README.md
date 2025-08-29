@@ -75,8 +75,13 @@ Create a .env file in video_subtitles_backend/ with at least:
 Ensure the PostgreSQL database exists and is reachable.
 
 ### 3) Run the app
-With the virtualenv activated:
-- uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+With the virtualenv activated, you can start the app in either of the following ways:
+
+- Using Python entrypoint (ensures 'src' is importable):
+  python main.py --host 0.0.0.0 --port 8000 --reload
+
+- Using uvicorn directly (works because 'src' is inside the container root):
+  uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 On first run, tables are created automatically and, if ENV=development and SEED_DB=true, a sample placeholder video entry is seeded.
 
