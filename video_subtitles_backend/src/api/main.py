@@ -5,12 +5,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from src.db.session import init_db, engine
+from src.api.routers.videos import router as videos_router
+from src.api.routers.subtitles import router as subtitles_router
 
 openapi_tags = [
     {
         "name": "Health",
         "description": "Basic service health and status endpoints.",
-    }
+    },
+    {
+        "name": "Videos",
+        "description": "Endpoints for listing, uploading, and streaming videos.",
+    },
+    {
+        "name": "Subtitles",
+        "description": "Endpoints for managing subtitle files associated to videos.",
+    },
 ]
 
 # Load .env (non-fatal if missing; rely on environment in deployment)
@@ -70,3 +80,8 @@ def health_check():
         JSON containing a simple 'Healthy' message.
     """
     return {"message": "Healthy"}
+
+
+# Register routers
+app.include_router(videos_router)
+app.include_router(subtitles_router)
