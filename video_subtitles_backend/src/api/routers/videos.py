@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Iterator
+import zlib
 
 from fastapi import APIRouter, File, HTTPException, Path as FPath, Query, UploadFile, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -24,6 +25,15 @@ def _parse_id_from_stem(stem: str) -> Optional[int]:
         return int(first)
     except Exception:
         return None
+
+
+def _hash_id_for_file(path: Path) -> int:
+    """Derive a deterministic positive integer ID from the filename when no prefix exists."""
+    # Use lowercase stem + extension to avoid case differences; CRC32 -> 0..2^32-1
+    raw = (path.name).encode("utf-8", errors="ignore")
+    val = zlib.crc32(raw) & 0xFFFFFFFF
+    # Avoid zero id which can be ambiguous; shift into 1.. range
+    return val or 1
 
 
 def _read_json(path: Path) -> dict:
@@ -84,25 +94,33 @@ def _collect_subtitles_for_video(video_id: int, request: Optional[Request]) -> L
 async def list_videos(
     q: Optional[str] = Query(default=None, description="Optional search string to filter by title"),
 ):
-    """List videos by scanning media/videos and reading JSON sidecar metadata."""
+    """List videos by scanning media/videos; sidecar metadata is optional.
+    Fallbacks:
+    - title from filename
+    - deterministic ID from filename when no numeric prefix exists
+    """
     ensure_media_dirs()
     vids_dir = get_video_dir()
     items: List[VideoListItem] = []
     for path in vids_dir.iterdir():
         if not path.is_file():
             continue
+        # Accept allowed video extensions
         if path.suffix.lower() not in VIDEO_EXTENSIONS:
             continue
         meta = _read_json(path.with_suffix(METADATA_EXT))
+        # Fallback metadata from filename
         title = meta.get("title") or path.stem
         desc = meta.get("description")
         vid = _parse_id_from_stem(path.stem)
+        if vid is None:
+            vid = _hash_id_for_file(path)
         created, updated = _fs_times(path)
         if q and q.lower() not in title.lower():
             continue
         items.append(
             VideoListItem(
-                id=vid or 0,
+                id=vid,
                 title=title,
                 description=desc,
                 created_at=created,
@@ -124,6 +142,24 @@ async def list_videos(
         404: {"model": ErrorResponse, "description": "Video not found"},
     },
 )
+def _resolve_video_path_by_id(video_id: int, vids_dir: Path) -> Optional[Path]:
+    """Resolve a video path by either leading numeric id prefix or deterministic hash of filename."""
+    # First try numeric prefix
+    prefix_matches = list(vids_dir.glob(f"{video_id}_*.*"))
+    for p in prefix_matches:
+        if p.suffix.lower() in VIDEO_EXTENSIONS and p.is_file():
+            return p
+    # Fallback: scan files and compute hash-based ids
+    for p in vids_dir.iterdir():
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in VIDEO_EXTENSIONS:
+            continue
+        if _hash_id_for_file(p) == video_id:
+            return p
+    return None
+
+
 async def get_video(
     video_id: int = FPath(..., description="ID of the video"),
     request: Request = None,
@@ -131,11 +167,9 @@ async def get_video(
     """Get a single video by ID from filesystem and include subtitles."""
     ensure_media_dirs()
     vids_dir = get_video_dir()
-    # Find first file starting with f"{video_id}_"
-    matches = list(vids_dir.glob(f"{video_id}_*.*"))
-    if not matches:
+    path = _resolve_video_path_by_id(video_id, vids_dir)
+    if path is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    path = matches[0]
     meta = _read_json(path.with_suffix(METADATA_EXT))
     title = meta.get("title") or path.stem
     desc = meta.get("description")
@@ -180,12 +214,16 @@ async def upload_video(
         raise HTTPException(status_code=400, detail="Unsupported video format")
 
     ext = get_extension(file.filename)
-    # Derive next ID by scanning existing files
+    # Derive next numeric ID by scanning existing numeric-prefixed files only
     vids_dir = get_video_dir()
     max_id = 0
-    for p in vids_dir.glob(f"*{ext}"):
-        vid = _parse_id_from_stem(p.stem) or 0
-        if vid > max_id:
+    for p in vids_dir.iterdir():
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in VIDEO_EXTENSIONS:
+            continue
+        vid = _parse_id_from_stem(p.stem)
+        if vid and vid > max_id:
             max_id = vid
     new_id = max_id + 1
 
@@ -223,10 +261,9 @@ async def stream_video(
     """Return a streaming response for the video file with HTTP Range support (filesystem-based)."""
     ensure_media_dirs()
     vids_dir = get_video_dir()
-    matches = list(vids_dir.glob(f"{video_id}_*.*"))
-    if not matches:
+    path = _resolve_video_path_by_id(video_id, vids_dir)
+    if path is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    path = matches[0]
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video file missing on server")
 

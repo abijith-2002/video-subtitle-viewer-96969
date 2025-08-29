@@ -6,11 +6,12 @@ from typing import Iterable
 
 
 # Accepted extensions
+# Include a broader set of common web-playable formats so manual files are detected.
 VIDEO_EXTENSIONS = {
-    ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi",
+    ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".ogg", ".ogv",
 }
 SUBTITLE_EXTENSIONS = {
-    ".vtt", ".srt",
+    ".vtt", ".srt",  # Note: .ass/.ssa are not served as text/vtt; keep common ones
 }
 
 # Very basic BCP-47-ish checker (allows en, en-US, pt-BR, zh-Hans, etc.)
