@@ -1,8 +1,29 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
-app = FastAPI()
+from src.db.session import init_db, engine
 
+openapi_tags = [
+    {
+        "name": "Health",
+        "description": "Basic service health and status endpoints.",
+    }
+]
+
+# Load .env (non-fatal if missing; rely on environment in deployment)
+load_dotenv()
+
+app = FastAPI(
+    title="Video Subtitles Backend",
+    description="Backend service for managing and serving videos and subtitles.",
+    version="0.1.0",
+    openapi_tags=openapi_tags,
+)
+
+# CORS - wide open for now; tighten in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -11,6 +32,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
+
+def ensure_media_dirs() -> None:
+    """Ensure media directories exist: media/videos and media/subtitles."""
+    base = Path("media")
+    videos = base / "videos"
+    subtitles = base / "subtitles"
+    for d in (base, videos, subtitles):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+@app.on_event("startup")
+async def on_startup():
+    """Initialize application resources.
+
+    - Ensure media storage directories are present
+    - Initialize database connectivity and create tables (simple migration)
+    """
+    ensure_media_dirs()
+    # Initialize the DB connection (reads env: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+    await init_db()
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Cleanup resources on shutdown."""
+    # Dispose engine if created
+    if engine is not None:
+        await engine.dispose()
+
+
+@app.get("/", tags=["Health"], summary="Health Check")
 def health_check():
+    """Health check endpoint.
+
+    Returns:
+        JSON containing a simple 'Healthy' message.
+    """
     return {"message": "Healthy"}
