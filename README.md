@@ -1,1 +1,3 @@
-# video-subtitle-viewer-96969
+# Project Repository
+
+This is the initial README file for the project.
