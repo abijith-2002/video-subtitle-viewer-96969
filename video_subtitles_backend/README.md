@@ -30,7 +30,7 @@ This README covers local development and deployment configuration, environment v
 - Upload video files with title and optional description
 - Stream video with HTTP range requests (supports browser seeking)
 - List available videos and fetch video details (including subtitle links)
-- Upload subtitle files (.vtt or .srt) and retrieve raw subtitle files
+- Upload and serve subtitle files (.vtt, .srt, or .ass) - Note: .ass subtitles require special player support
 - Health check endpoint
 - CORS enabled (wide open by default; tighten in production)
 

@@ -22,7 +22,7 @@ class SubtitleOut(SubtitleBase):
     file_path: str = Field(..., description="Filesystem path for the subtitle file")
     created_at: Optional[datetime] = Field(None, description="File creation time (from filesystem if available)")
     updated_at: Optional[datetime] = Field(None, description="Last modification time (from filesystem)")
-    file_url: Optional[str] = Field(None, description="Absolute URL to download subtitle file")
+    file_url: Optional[str] = Field(None, description="Absolute URL to download subtitle file. Note: .ass subtitle files require special player support.")
 
 
 class VideoBase(BaseModel):

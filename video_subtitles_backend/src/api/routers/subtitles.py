@@ -73,7 +73,7 @@ async def list_subtitles_for_video(
     "/videos/{video_id}/subtitles",
     response_model=SubtitleOut,
     summary="Upload subtitle for a video",
-    description="Upload a subtitle file (.vtt or .srt) and associate it with the specified video.",
+    description="Upload a subtitle file (.vtt, .srt, or .ass) and associate it with the specified video. Note that .ass subtitle files require special video player support and may not work with standard HTML5 players.",
     responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
 )
 async def upload_subtitle_for_video(
@@ -139,7 +139,12 @@ async def get_subtitle_file(
     if not path.exists():
         raise HTTPException(status_code=404, detail="Subtitle file missing on server")
 
-    media_type = "text/vtt" if path.suffix.lower() == ".vtt" else "text/plain"
+    ext = path.suffix.lower()
+    media_type = {
+        ".vtt": "text/vtt",
+        ".ass": "text/x-ssa",  # MIME type for ASS/SSA subtitles
+        ".srt": "text/plain"
+    }.get(ext, "text/plain")
     # Include permissive CORS headers so the <track> element can fetch from browser
     resp = FileResponse(path, media_type=media_type, filename=path.name)
     resp.headers["Access-Control-Allow-Origin"] = "*"

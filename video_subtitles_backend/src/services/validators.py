@@ -11,7 +11,7 @@ VIDEO_EXTENSIONS = {
     ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".ogg", ".ogv",
 }
 SUBTITLE_EXTENSIONS = {
-    ".vtt", ".srt",  # Note: .ass/.ssa are not served as text/vtt; keep common ones
+    ".vtt", ".srt", ".ass",  # Note: .ass files require special player support
 }
 
 # Very basic BCP-47-ish checker (allows en, en-US, pt-BR, zh-Hans, etc.)
