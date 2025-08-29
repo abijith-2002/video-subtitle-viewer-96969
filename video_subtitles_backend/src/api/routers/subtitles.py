@@ -116,4 +116,9 @@ async def get_subtitle_file(
         raise HTTPException(status_code=404, detail="Subtitle file missing on server")
 
     media_type = "text/vtt" if path.suffix.lower() == ".vtt" else "text/plain"
-    return FileResponse(path, media_type=media_type)
+    # Include permissive CORS headers so the <track> element can fetch from browser
+    resp = FileResponse(path, media_type=media_type, filename=path.name)
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Headers"] = "Origin, Content-Type, Accept, Range"
+    resp.headers["Access-Control-Expose-Headers"] = "Content-Type, Content-Length"
+    return resp

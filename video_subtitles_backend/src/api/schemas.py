@@ -37,6 +37,8 @@ class VideoOut(VideoBase):
     created_at: datetime
     updated_at: datetime
     subtitles: List[SubtitleOut] = Field(default_factory=list, description="List of subtitles linked to this video")
+    # Helper client-ready URL to stream the video from this backend
+    stream_url: Optional[str] = Field(None, description="Absolute URL to stream this video")
 
 
 class VideoListItem(BaseModel):
