@@ -11,15 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.schemas import ErrorResponse, SubtitleOut
 from src.db.models import Subtitle, Video
 from src.db.session import get_async_session
+from src.services.storage import ensure_media_dirs, get_subtitle_dir, build_unique_path, save_upload_file
+from src.services.validators import SUBTITLE_EXTENSIONS, has_allowed_extension, get_extension, is_valid_language_code
 
 router = APIRouter(prefix="", tags=["Subtitles"])
-
-MEDIA_BASE = Path("media")
-SUB_DIR = MEDIA_BASE / "subtitles"
-
-
-def _ext_is_subtitle(ext: str) -> bool:
-    return ext.lower() in {".vtt", ".srt"}
 
 
 # PUBLIC_INTERFACE
@@ -74,25 +69,19 @@ async def upload_subtitle_for_video(
         raise HTTPException(status_code=404, detail="Video not found")
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded subtitle must have a filename")
+    if not is_valid_language_code(language):
+        raise HTTPException(status_code=400, detail="Invalid language code")
 
-    SUB_DIR.mkdir(parents=True, exist_ok=True)
-    ext = Path(file.filename).suffix
-    if not _ext_is_subtitle(ext):
+    ensure_media_dirs()
+
+    if not has_allowed_extension(file.filename, SUBTITLE_EXTENSIONS):
         raise HTTPException(status_code=400, detail="Unsupported subtitle format. Use .vtt or .srt")
 
+    ext = get_extension(file.filename)
     base = Path(file.filename).stem
-    dest = SUB_DIR / f"{video_id}_{base}{ext}"
-    counter = 1
-    while dest.exists():
-        dest = SUB_DIR / f"{video_id}_{base}_{counter}{ext}"
-        counter += 1
+    dest = build_unique_path(get_subtitle_dir(), base_name=base, ext=ext, prefix=str(video_id))
 
-    try:
-        with dest.open("wb") as out:
-            while chunk := await file.read(1024 * 256):
-                out.write(chunk)
-    finally:
-        await file.close()
+    await save_upload_file(file, dest, chunk_size=1024 * 256)
 
     s = Subtitle(language=language, video_id=video_id, file_path=str(dest))
     session.add(s)

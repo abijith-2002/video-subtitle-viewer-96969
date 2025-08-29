@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -7,6 +5,7 @@ from dotenv import load_dotenv
 from src.db.session import init_db, engine
 from src.api.routers.videos import router as videos_router
 from src.api.routers.subtitles import router as subtitles_router
+from src.services.storage import ensure_media_dirs
 
 openapi_tags = [
     {
@@ -41,15 +40,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def ensure_media_dirs() -> None:
-    """Ensure media directories exist: media/videos and media/subtitles."""
-    base = Path("media")
-    videos = base / "videos"
-    subtitles = base / "subtitles"
-    for d in (base, videos, subtitles):
-        d.mkdir(parents=True, exist_ok=True)
 
 
 @app.on_event("startup")

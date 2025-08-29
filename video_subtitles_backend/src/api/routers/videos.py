@@ -11,16 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.schemas import ErrorResponse, VideoListItem, VideoOut
 from src.db.models import Video
 from src.db.session import get_async_session
+from src.services.storage import ensure_media_dirs, get_video_dir, build_unique_path, save_upload_file
+from src.services.validators import VIDEO_EXTENSIONS, has_allowed_extension, get_extension
 
 router = APIRouter(prefix="/videos", tags=["Videos"])
-
-MEDIA_BASE = Path("media")
-VIDEO_DIR = MEDIA_BASE / "videos"
-
-
-def _safe_filename(name: str) -> str:
-    """Return a filesystem-safe filename (very basic)."""
-    return "".join(c for c in name if c.isalnum() or c in (" ", ".", "-", "_")).strip().replace(" ", "_")
 
 
 # PUBLIC_INTERFACE
@@ -122,27 +116,17 @@ async def upload_video(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename")
 
-    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-    ext = Path(file.filename).suffix
-    if not ext:
-        raise HTTPException(status_code=400, detail="Video file must have an extension")
+    ensure_media_dirs()
 
-    safe_base = _safe_filename(Path(file.filename).stem) or "video"
-    dest_path = VIDEO_DIR / f"{safe_base}{ext}"
+    if not has_allowed_extension(file.filename, VIDEO_EXTENSIONS):
+        raise HTTPException(status_code=400, detail="Unsupported video format")
 
-    # Avoid overwriting: if exists, add counter
-    counter = 1
-    while dest_path.exists():
-        dest_path = VIDEO_DIR / f"{safe_base}_{counter}{ext}"
-        counter += 1
+    ext = get_extension(file.filename)
+    base_name = Path(file.filename).stem
+    dest_path = build_unique_path(get_video_dir(), base_name=base_name, ext=ext)
 
     # Save file to disk
-    try:
-        with dest_path.open("wb") as out:
-            while chunk := await file.read(1024 * 1024):
-                out.write(chunk)
-    finally:
-        await file.close()
+    await save_upload_file(file, dest_path)
 
     # Create DB record
     v = Video(title=title, description=description, file_path=str(dest_path))
