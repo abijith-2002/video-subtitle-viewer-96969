@@ -3,14 +3,11 @@ import json
 import os
 from typing import Any, Dict
 
-from src.api.main import app, on_startup
+from src.api.main import app
 
 
 async def generate() -> Dict[str, Any]:
-    """Ensure startup hooks ran (to build routes consistently), then dump OpenAPI."""
-    # Run startup to ensure any dynamic route setup is applied (idempotent)
-    await on_startup()
-    # Generate schema
+    """Dump OpenAPI schema."""
     return app.openapi()
 
 

@@ -2,12 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from src.db.session import init_db, engine, get_async_session
 from src.api.routers.videos import router as videos_router
 from src.api.routers.subtitles import router as subtitles_router
 from src.services.storage import ensure_media_dirs
-from src.api.settings import settings
-from src.db.seed import seed_if_empty
 
 openapi_tags = [
     {
@@ -49,27 +46,15 @@ async def on_startup():
     """Initialize application resources.
 
     - Ensure media storage directories are present (configurable via MEDIA_ROOT)
-    - Initialize database connectivity and create tables (simple migration)
-    - Optionally seed DB with sample data on first run (dev utility controlled by SEED_DB)
+    - No database is used; all metadata is derived from filesystem.
     """
-    # Ensure directories based on MEDIA_ROOT from settings
     ensure_media_dirs()
-
-    # Initialize DB (reads env vars in db.session.build_postgres_dsn)
-    await init_db()
-
-    # Optional seeding for development environments
-    if settings.ENV in {"development", "dev"} and settings.SEED_DB:
-        async with get_async_session() as session:
-            await seed_if_empty(session)
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    """Cleanup resources on shutdown."""
-    # Dispose engine if created
-    if engine is not None:
-        await engine.dispose()
+    """No-op shutdown; no DB connections to dispose."""
+    return None
 
 
 @app.get("/", tags=["Health"], summary="Health Check")

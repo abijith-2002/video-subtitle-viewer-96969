@@ -1,8 +1,5 @@
 """
-Database package initialization for video_subtitles_backend.
+Database package retained for backward compatibility but unused.
 
-Exposes key utilities for external modules.
+All endpoints are filesystem-based now; database models/sessions are not used.
 """
-
-from .session import get_async_session, init_db, engine  # noqa: F401
-from .models import Base, Video, Subtitle  # noqa: F401

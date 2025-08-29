@@ -11,7 +11,7 @@ load_dotenv()
 
 
 class Settings:
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables (filesystem-only)."""
 
     def __init__(self) -> None:
         # MEDIA_ROOT configuration - default to ./media if not provided
@@ -23,17 +23,6 @@ class Settings:
 
         # Optional: environment marker (development|production|test)
         self.ENV = os.getenv("ENV", "development").lower()
-
-        # Optional flag to seed database with sample data if empty
-        # Use "true"/"1"/"yes" to enable
-        self.SEED_DB = os.getenv("SEED_DB", "false").strip().lower() in {"1", "true", "yes"}
-
-        # Database variables (must be provided by environment)
-        self.DB_HOST = os.getenv("DB_HOST")
-        self.DB_PORT = os.getenv("DB_PORT")
-        self.DB_NAME = os.getenv("DB_NAME")
-        self.DB_USER = os.getenv("DB_USER")
-        self.DB_PASSWORD = os.getenv("DB_PASSWORD")
 
     def ensure_media_dirs(self) -> None:
         """Ensure the MEDIA_ROOT and subdirectories exist."""

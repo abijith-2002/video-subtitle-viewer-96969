@@ -1,20 +1,76 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Iterator
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path as FPath, Query, UploadFile, Request
+from fastapi import APIRouter, File, HTTPException, Path as FPath, Query, UploadFile, Request
 from fastapi.responses import StreamingResponse, JSONResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.schemas import ErrorResponse, VideoListItem, VideoOut
-from src.db.models import Video
-from src.db.session import get_async_session
-from src.services.storage import ensure_media_dirs, get_video_dir, build_unique_path, save_upload_file
+from src.api.schemas import ErrorResponse, VideoListItem, VideoOut, SubtitleOut
+from src.services.storage import ensure_media_dirs, get_video_dir, build_unique_path, save_upload_file, get_subtitle_dir
 from src.services.validators import VIDEO_EXTENSIONS, has_allowed_extension, get_extension
 
 router = APIRouter(prefix="/videos", tags=["Videos"])
+
+METADATA_EXT = ".json"
+
+
+def _parse_id_from_stem(stem: str) -> Optional[int]:
+    """Try to parse a leading numeric ID from a file stem like '12_myvideo'."""
+    first = stem.split("_", 1)[0]
+    try:
+        return int(first)
+    except Exception:
+        return None
+
+
+def _read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _fs_times(p: Path) -> tuple[Optional[datetime], Optional[datetime]]:
+    try:
+        st = p.stat()
+        created = datetime.fromtimestamp(getattr(st, "st_ctime", st.st_mtime))
+        updated = datetime.fromtimestamp(st.st_mtime)
+        return created, updated
+    except Exception:
+        return None, None
+
+
+def _collect_subtitles_for_video(video_id: int, request: Optional[Request]) -> List[SubtitleOut]:
+    subs_dir = get_subtitle_dir()
+    items: List[SubtitleOut] = []
+    for sub_path in subs_dir.glob(f"{video_id}_*.*"):
+        sub_meta = _read_json(sub_path.with_suffix(METADATA_EXT))
+        lang = sub_meta.get("language") or "en"
+        sid = _parse_id_from_stem(sub_path.stem) or 0
+        created, updated = _fs_times(sub_path)
+        items.append(
+            SubtitleOut(
+                id=sid,
+                language=lang,
+                video_id=video_id,
+                file_path=str(sub_path),
+                created_at=created,
+                updated_at=updated,
+                file_url=(str(request.url_for("get_subtitle_file", subtitle_id=sid)) if request else None),
+            )
+        )
+    # Sort by created_at then filename
+    items.sort(key=lambda s: (s.created_at or datetime.min, s.file_path))
+    return items
 
 
 # PUBLIC_INTERFACE
@@ -26,27 +82,35 @@ router = APIRouter(prefix="/videos", tags=["Videos"])
     responses={404: {"model": ErrorResponse}},
 )
 async def list_videos(
-    session: AsyncSession = Depends(get_async_session),
     q: Optional[str] = Query(default=None, description="Optional search string to filter by title"),
 ):
-    """List all videos optionally filtered by a search query."""
-    stmt = select(Video)
-    if q:
-        # simple ilike filter
-        stmt = stmt.where(Video.title.ilike(f"%{q}%"))
-    stmt = stmt.order_by(Video.created_at.desc())
-    res = await session.execute(stmt)
-    items = []
-    for v in res.scalars().all():
+    """List videos by scanning media/videos and reading JSON sidecar metadata."""
+    ensure_media_dirs()
+    vids_dir = get_video_dir()
+    items: List[VideoListItem] = []
+    for path in vids_dir.iterdir():
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in VIDEO_EXTENSIONS:
+            continue
+        meta = _read_json(path.with_suffix(METADATA_EXT))
+        title = meta.get("title") or path.stem
+        desc = meta.get("description")
+        vid = _parse_id_from_stem(path.stem)
+        created, updated = _fs_times(path)
+        if q and q.lower() not in title.lower():
+            continue
         items.append(
             VideoListItem(
-                id=v.id,
-                title=v.title,
-                description=v.description,
-                created_at=v.created_at,
-                updated_at=v.updated_at,
+                id=vid or 0,
+                title=title,
+                description=desc,
+                created_at=created,
+                updated_at=updated,
             )
         )
+    # Sort newest first
+    items.sort(key=lambda x: (x.created_at or datetime.min), reverse=True)
     return items
 
 
@@ -62,41 +126,30 @@ async def list_videos(
 )
 async def get_video(
     video_id: int = FPath(..., description="ID of the video"),
-    session: AsyncSession = Depends(get_async_session),
     request: Request = None,
 ):
-    """Get a single video by ID including its subtitles."""
-    obj = await session.get(Video, video_id)
-    if not obj:
+    """Get a single video by ID from filesystem and include subtitles."""
+    ensure_media_dirs()
+    vids_dir = get_video_dir()
+    # Find first file starting with f"{video_id}_"
+    matches = list(vids_dir.glob(f"{video_id}_*.*"))
+    if not matches:
         raise HTTPException(status_code=404, detail="Video not found")
-
-    # Load subtitles
-    await session.refresh(obj)
-    subs = []
-    for s in obj.subtitles:
-        subs.append(
-            {
-                "id": s.id,
-                "language": s.language,
-                "video_id": s.video_id,
-                "file_path": s.file_path,
-                "created_at": s.created_at,
-                "updated_at": s.updated_at,
-                # Provide absolute URL to fetch subtitle file
-                "file_url": str(request.url_for("get_subtitle_file", subtitle_id=s.id)) if request else None,
-            }
-        )
-
+    path = matches[0]
+    meta = _read_json(path.with_suffix(METADATA_EXT))
+    title = meta.get("title") or path.stem
+    desc = meta.get("description")
+    created, updated = _fs_times(path)
+    subs = _collect_subtitles_for_video(video_id, request)
     return VideoOut(
-        id=obj.id,
-        title=obj.title,
-        description=obj.description,
-        file_path=obj.file_path,
-        created_at=obj.created_at,
-        updated_at=obj.updated_at,
+        id=video_id,
+        title=title,
+        description=desc,
+        file_path=str(path),
+        created_at=created,
+        updated_at=updated,
         subtitles=subs,
-        # Provide absolute streaming URL
-        stream_url=str(request.url_for("stream_video", video_id=obj.id)) if request else None,
+        stream_url=str(request.url_for("stream_video", video_id=video_id)) if request else None,
     )
 
 
@@ -105,7 +158,7 @@ async def get_video(
     "/upload",
     response_model=VideoOut,
     summary="Upload a new video",
-    description="Upload a video file and create a database record with its metadata.",
+    description="Upload a video file and create metadata sidecar on filesystem.",
     responses={
         400: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
@@ -115,9 +168,9 @@ async def upload_video(
     title: str = Query(..., description="Title for the uploaded video"),
     description: Optional[str] = Query(default=None, description="Optional description"),
     file: UploadFile = File(..., description="Binary video file to upload"),
-    session: AsyncSession = Depends(get_async_session),
+    request: Request = None,
 ):
-    """Upload a video file and persist metadata in the database."""
+    """Upload a video file; filename format is '<id>_<safe-title>.<ext>' with id auto-incremented from existing files."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename")
 
@@ -127,19 +180,33 @@ async def upload_video(
         raise HTTPException(status_code=400, detail="Unsupported video format")
 
     ext = get_extension(file.filename)
-    base_name = Path(file.filename).stem
-    dest_path = build_unique_path(get_video_dir(), base_name=base_name, ext=ext)
+    # Derive next ID by scanning existing files
+    vids_dir = get_video_dir()
+    max_id = 0
+    for p in vids_dir.glob(f"*{ext}"):
+        vid = _parse_id_from_stem(p.stem) or 0
+        if vid > max_id:
+            max_id = vid
+    new_id = max_id + 1
+
+    # Build filename with id prefix using build_unique_path for collision safety
+    base_name = f"{new_id}_{title}"
+    dest_path = build_unique_path(vids_dir, base_name=base_name, ext=ext)
 
     # Save file to disk
     await save_upload_file(file, dest_path)
 
-    # Create DB record
-    v = Video(title=title, description=description, file_path=str(dest_path))
-    session.add(v)
-    await session.flush()  # obtain ID
+    # Sidecar metadata JSON
+    meta = {
+        "id": new_id,
+        "title": title,
+        "description": description,
+        "file_path": str(dest_path),
+    }
+    _write_json(dest_path.with_suffix(METADATA_EXT), meta)
 
-    # Prepare response
-    return await get_video(video_id=v.id, session=session)  # reuse detail builder
+    # Build and return details
+    return await get_video(video_id=new_id, request=request)
 
 
 # PUBLIC_INTERFACE
@@ -151,14 +218,15 @@ async def upload_video(
 )
 async def stream_video(
     video_id: int = FPath(..., description="ID of the video to stream"),
-    session: AsyncSession = Depends(get_async_session),
     request: Request = None,
 ):
-    """Return a streaming response for the video file with HTTP Range support."""
-    v = await session.get(Video, video_id)
-    if not v:
+    """Return a streaming response for the video file with HTTP Range support (filesystem-based)."""
+    ensure_media_dirs()
+    vids_dir = get_video_dir()
+    matches = list(vids_dir.glob(f"{video_id}_*.*"))
+    if not matches:
         raise HTTPException(status_code=404, detail="Video not found")
-    path = Path(v.file_path)
+    path = matches[0]
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video file missing on server")
 
