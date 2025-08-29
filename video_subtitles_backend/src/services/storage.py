@@ -5,16 +5,17 @@ from typing import AsyncIterator, Optional
 
 from fastapi import UploadFile
 
+from src.api.settings import settings
 
-MEDIA_BASE = Path("media")
+# Derive directories from configurable MEDIA_ROOT
+MEDIA_BASE = settings.MEDIA_ROOT
 VIDEO_DIR = MEDIA_BASE / "videos"
 SUBTITLE_DIR = MEDIA_BASE / "subtitles"
 
 
 def ensure_media_dirs() -> None:
-    """Ensure base media storage directories exist."""
-    for d in (MEDIA_BASE, VIDEO_DIR, SUBTITLE_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+    """Ensure base media storage directories exist (uses MEDIA_ROOT from settings)."""
+    settings.ensure_media_dirs()
 
 
 def _safe_filename(name: str) -> str:
